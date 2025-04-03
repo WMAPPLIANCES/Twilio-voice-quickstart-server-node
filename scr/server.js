@@ -1,27 +1,18 @@
 // Carrega variáveis de ambiente do arquivo .env APENAS em ambiente de desenvolvimento local
-// Em produção (Easypanel), as variáveis devem ser configuradas na plataforma.
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
 }
 
 const express = require('express');
 const twilio = require('twilio');
-const AccessToken = twilio.jwt.AccessToken;
-const VoiceGrant = AccessToken.VoiceGrant;
-const VoiceResponse = twilio.twiml.VoiceResponse;
+const crypto = require('crypto'); // Para gerar IDs únicos para a conferência
 
 // --- Validação Inicial das Variáveis de Ambiente Essenciais ---
+// Para este fluxo, precisamos apenas do Account SID, Auth Token e o Número de Máscara
 const requiredEnvVars = [
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
-  'TWILIO_API_KEY_SID',
-  'TWILIO_API_KEY_SECRET',
-  'TWILIO_APP_SID',
   'TWILIO_NUMBER_MASK',
-  // Adicione os SIDs de push se forem estritamente necessários para *todas* as operações
-  // 'TWILIO_ANDROID_PUSH_CREDENTIAL_SID',
-  // 'TWILIO_IOS_PUSH_CREDENTIAL_SID_DEBUG',
-  // 'TWILIO_IOS_PUSH_CREDENTIAL_SID_RELEASE',
 ];
 
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -29,154 +20,174 @@ const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 if (missingEnvVars.length > 0) {
   console.error('ERRO FATAL: Variáveis de ambiente ausentes:', missingEnvVars.join(', '));
   console.error('Por favor, configure essas variáveis no seu ambiente (Easypanel ou .env local).');
-  process.exit(1); // Impede o servidor de iniciar sem configuração essencial
+  process.exit(1);
 }
 
 // --- Configuração das Credenciais (lidas do ambiente) ---
 const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
-const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN; // Usado pelo client Twilio se necessário, mas não para tokens JWT
-const twilioApiKeySid = process.env.TWILIO_API_KEY_SID;
-const twilioApiKeySecret = process.env.TWILIO_API_KEY_SECRET;
-const twilioAppSid = process.env.TWILIO_APP_SID;
-const twilioMaskingNumber = process.env.TWILIO_NUMBER_MASK;
+const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN; // ESSENCIAL para a API REST
+const twilioMaskingNumber = process.env.TWILIO_NUMBER_MASK; // Seu número Twilio comprado
+
+// --- Inicialização do Cliente Twilio (para API REST) ---
+const twilioClient = twilio(twilioAccountSid, twilioAuthToken);
 
 // --- Inicialização do Express ---
 const app = express();
-// Middleware para parsear dados de formulário URL-encoded (usado pelo webhook do Twilio)
-app.use(express.urlencoded({ extended: false }));
-// Middleware para parsear JSON (útil se você tiver outros endpoints API)
+// Middleware para parsear JSON (para o endpoint de gatilho /iniciar-chamada-mascarada)
 app.use(express.json());
+// Middleware para parsear dados de formulário URL-encoded (usado pelos webhooks TwiML do Twilio)
+app.use(express.urlencoded({ extended: false }));
 
-// --- Endpoint para Gerar Access Token (/generate-token) ---
-app.get('/generate-token', (req, res) => {
-  // Pega a identidade (ex: 'client:tecnico123') e plataforma do query param
-  const identity = req.query.identity;
-  const platform = req.query.platform; // 'ios', 'android', 'web', 'macos'
-  // Verifica se o app está rodando em modo de produção (para selecionar o push credential correto do iOS)
-  const isProduction = req.query.production === 'true';
+// --- Constante com a URL Base do seu serviço ---
+// Certifique-se que esta é a URL pública correta do seu serviço no Easypanel
+const BASE_URL = 'https://phone.wmappliances.cloud';
 
-  if (!identity) {
-    console.warn('Requisição para /generate-token sem identity');
-    return res.status(400).json({ error: 'Parâmetro "identity" é obrigatório.' });
+// --- Endpoint de Gatilho (Chamado pelo FlutterFlow) ---
+app.post('/iniciar-chamada-mascarada', async (req, res) => {
+  const { tecnicoNumero, clienteNumero } = req.body;
+
+  console.log(`Recebida solicitação para conectar Técnico (${tecnicoNumero}) e Cliente (${clienteNumero})`);
+
+  // Validação básica dos números (adicione validações mais robustas se necessário)
+  if (!tecnicoNumero || !clienteNumero) {
+    console.error('Erro: Números do técnico ou cliente não fornecidos.');
+    return res.status(400).json({ success: false, message: 'Números do técnico e cliente são obrigatórios.' });
   }
-  if (!platform) {
-    console.warn(`Requisição para /generate-token para ${identity} sem platform`);
-    return res.status(400).json({ error: 'Parâmetro "platform" é obrigatório (ios, android, web, macos).' });
-  }
+  // Adicione aqui validação de formato E.164 se desejar (ex: /^\+[1-9]\d{1,14}$/)
 
-  console.log(`Gerando token para identity: ${identity}, platform: ${platform}, production: ${isProduction}`);
+  // Gera um nome único para a sala de conferência desta sessão
+  const conferenceName = `conf_${crypto.randomUUID()}`;
+  console.log(`Usando sala de conferência: ${conferenceName}`);
 
   try {
-    const pushCredentialSid = getPushCredentialSid(platform, isProduction);
+    // 1. Iniciar chamada para o TÉCNICO
+    console.log(`Iniciando chamada para o Técnico: ${tecnicoNumero}`);
+    const callToTecnico = await twilioClient.calls.create({
+      to: tecnicoNumero,
+      from: twilioMaskingNumber,
+      // URL que o Twilio chamará QUANDO o técnico atender
+      // Passamos o nome da conferência como query parameter
+      url: `${BASE_URL}/handle-tecnico-answer?confName=${encodeURIComponent(conferenceName)}`,
+      method: 'POST', // Método que o Twilio usará para chamar a URL acima
+      // Você pode adicionar um statusCallback para saber o status da chamada (ringing, answered, completed, etc.)
+      // statusCallback: `${BASE_URL}/call-status`,
+      // statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      // statusCallbackMethod: 'POST',
+    });
+    console.log(`Chamada para Técnico iniciada, SID: ${callToTecnico.sid}`);
 
-    if (!pushCredentialSid && (platform === 'ios' || platform === 'android')) {
-       console.error(`ERRO: Push Credential SID não encontrado/configurado para platform=${platform}, production=${isProduction}. Verifique as variáveis de ambiente.`);
-       // Decide se quer retornar erro ou gerar token sem push (não receberá chamadas em background)
-       // return res.status(500).json({ error: 'Configuração de Push Credential ausente no servidor.' });
-    }
+    // 2. Iniciar chamada para o CLIENTE
+    console.log(`Iniciando chamada para o Cliente: ${clienteNumero}`);
+    const callToCliente = await twilioClient.calls.create({
+      to: clienteNumero,
+      from: twilioMaskingNumber, // IMPORTANTE: Usar o mesmo número de máscara
+      // URL que o Twilio chamará QUANDO o cliente atender
+      url: `${BASE_URL}/handle-cliente-answer?confName=${encodeURIComponent(conferenceName)}`,
+      method: 'POST',
+      // statusCallback: `${BASE_URL}/call-status`,
+      // statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      // statusCallbackMethod: 'POST',
+    });
+    console.log(`Chamada para Cliente iniciada, SID: ${callToCliente.sid}`);
 
-    const voiceGrant = new VoiceGrant({
-      outgoingApplicationSid: twilioAppSid,
-      // Inclui o push credential SID apenas se encontrado (essencial para Android/iOS background)
-      ...(pushCredentialSid && { pushCredentialSid: pushCredentialSid })
+    // Responde ao FlutterFlow que as chamadas foram iniciadas
+    res.status(200).json({
+      success: true,
+      message: 'Chamadas para técnico e cliente iniciadas.',
+      conferenceName: conferenceName, // Opcional: retornar o nome da conferência
+      tecnicoCallSid: callToTecnico.sid, // Opcional: retornar SIDs
+      clienteCallSid: callToCliente.sid,
     });
 
-    // TTL (Time To Live) do token em segundos (1 hora = 3600) - Máximo 24h (86400)
-    const tokenTTL = 3600;
-
-    const token = new AccessToken(
-      twilioAccountSid,
-      twilioApiKeySid,
-      twilioApiKeySecret,
-      { identity: identity, ttl: tokenTTL }
-    );
-
-    token.addGrant(voiceGrant);
-    const jwtToken = token.toJwt();
-
-    console.log(`Token gerado com sucesso para ${identity}`);
-    res.json({
-        token: jwtToken,
-        identity: identity,
-        // Opcional: retornar expiração para o cliente saber quando renovar
-        // expires_in: tokenTTL * 1000 // Em milissegundos
-     });
-
   } catch (error) {
-    console.error(`Erro ao gerar token para ${identity}:`, error);
-    res.status(500).json({ error: 'Falha ao gerar o token de acesso.' });
+    console.error('Erro ao iniciar chamadas via API Twilio:', error);
+    // Tenta pegar a mensagem de erro específica do Twilio, se disponível
+    const errorMessage = error.message || 'Erro interno do servidor ao iniciar chamadas.';
+    const errorStatus = error.status || 500;
+    res.status(errorStatus).json({ success: false, message: errorMessage });
   }
 });
 
-// --- Endpoint para Webhook de Chamada do Twilio (/make-call) ---
-app.post('/make-call', (req, res) => {
-  const from = req.body.From; // Quem está originando (ex: 'client:tecnico123' ou número se for chamada direta)
-  const to = req.body.To;     // Para quem o Twilio foi instruído a ligar (ex: '+55119xxxxxxx')
-  // Você pode pegar parâmetros extras passados pelo app aqui: const customParam = req.body.MeuParametroExtra;
+// --- Endpoint TwiML chamado quando o TÉCNICO atende ---
+app.post('/handle-tecnico-answer', (req, res) => {
+  const conferenceName = req.query.confName; // Pega o nome da conferência do query param
+  const callSid = req.body.CallSid; // SID da chamada do técnico
 
-  console.log(`Webhook /make-call recebido: From=${from}, To=${to}`);
-  console.log(`Usando número de máscara: ${twilioMaskingNumber}`);
+  console.log(`Técnico atendeu (CallSid: ${callSid}). Conectando à conferência: ${conferenceName}`);
 
-  const twiml = new VoiceResponse();
-
-  // Verifica se o destino 'To' foi fornecido
-  if (!to) {
-    console.error('Webhook /make-call: Destino (To) não fornecido na requisição.');
-    twiml.say({ language: 'pt-BR' }, 'Desculpe, o número de destino não foi fornecido.');
-  } else {
-    // Configura os atributos da discagem (Dial)
-    const dialAttributes = {
-      callerId: twilioMaskingNumber, // ESSENCIAL para o mascaramento
-      // Outros atributos opcionais:
-      // timeout: 30, // Tempo limite para atender (segundos)
-      // record: 'record-from-answer-dual', // Gravar a chamada (verifique custos e privacidade)
-      // trim: 'trim-silence', // Remover silêncio do início/fim da gravação
-      // action: '/handle-dial-status', // URL para receber status da chamada (atendida, ocupada, etc.)
-      // method: 'POST'
-    };
-
-    // Cria a instrução Dial
-    const dial = twiml.dial(dialAttributes);
-
-    // Determina se 'to' é um número de telefone (formato E.164) ou um client SIP/WebRTC
-    // Para o caso de uso "técnico liga para cliente", 'to' geralmente será um número.
-    if (to.startsWith('+') && to.length > 10) { // Validação básica de número E.164
-      console.log(`Discando para NÚMERO: ${to}`);
-      dial.number(to);
-    } else if (to.startsWith('client:')) {
-      console.log(`Discando para CLIENT: ${to}`);
-      dial.client(to);
-    } else {
-      console.warn(`Webhook /make-call: Formato de destino (To) não reconhecido: ${to}`);
-      twiml.say({ language: 'pt-BR' }, 'Desculpe, o formato do destino é inválido.');
-    }
+  if (!conferenceName) {
+      console.error("Erro: Nome da conferência não recebido no TwiML do técnico.");
+      // Responde com erro, mas evita que a chamada caia imediatamente
+      const twimlError = new twilio.twiml.VoiceResponse();
+      twimlError.say({ language: 'pt-BR' }, 'Ocorreu um erro ao conectar. Por favor, tente novamente.');
+      twimlError.hangup();
+      res.type('text/xml');
+      return res.send(twimlError.toString());
   }
 
-  // Define o tipo de conteúdo da resposta como XML
+  const twiml = new twilio.twiml.VoiceResponse();
+  // Mensagem opcional para o técnico
+  twiml.say({ language: 'pt-BR' }, 'Conectando você ao cliente. Por favor, aguarde.');
+
+  // Conecta o técnico à conferência especificada
+  const dial = twiml.dial();
+  dial.conference(conferenceName);
+  // Você pode adicionar atributos à conferência aqui, se necessário
+  // Ex: startConferenceOnEnter=true, endConferenceOnExit=true (cuidado com este último)
+  // dial.conference({ startConferenceOnEnter: true }, conferenceName);
+
   res.type('text/xml');
-  // Envia a resposta TwiML gerada
   res.send(twiml.toString());
 });
 
-// --- Função Auxiliar para Obter Push Credential SID ---
-function getPushCredentialSid(platform, isProduction) {
-  platform = platform?.toLowerCase(); // Garante minúsculas
+// --- Endpoint TwiML chamado quando o CLIENTE atende ---
+app.post('/handle-cliente-answer', (req, res) => {
+  const conferenceName = req.query.confName; // Pega o nome da conferência do query param
+  const callSid = req.body.CallSid; // SID da chamada do cliente
 
-  if (platform === 'android') {
-    return process.env.TWILIO_ANDROID_PUSH_CREDENTIAL_SID;
-  } else if (platform === 'ios') {
-    if (isProduction) {
-      // Usa o de Release, ou o de Debug se o de Release não estiver configurado (fallback)
-      return process.env.TWILIO_IOS_PUSH_CREDENTIAL_SID_RELEASE || process.env.TWILIO_IOS_PUSH_CREDENTIAL_SID_DEBUG;
-    } else {
-      // Usa o de Debug, ou o de Release se o de Debug não estiver configurado (fallback)
-      return process.env.TWILIO_IOS_PUSH_CREDENTIAL_SID_DEBUG || process.env.TWILIO_IOS_PUSH_CREDENTIAL_SID_RELEASE;
-    }
+  console.log(`Cliente atendeu (CallSid: ${callSid}). Conectando à conferência: ${conferenceName}`);
+
+   if (!conferenceName) {
+      console.error("Erro: Nome da conferência não recebido no TwiML do cliente.");
+      const twimlError = new twilio.twiml.VoiceResponse();
+      twimlError.say({ language: 'pt-BR' }, 'Ocorreu um erro ao conectar. Por favor, tente novamente.');
+      twimlError.hangup();
+      res.type('text/xml');
+      return res.send(twimlError.toString());
   }
-  // Web e macOS (usando twilio.js) não usam Push Credential SIDs para receber chamadas via SDK JS
-  // Eles usam WebSockets ou mecanismos similares gerenciados pelo SDK JS.
-  return undefined;
-}
+
+  const twiml = new twilio.twiml.VoiceResponse();
+  // NÃO coloque 'say' aqui, pois o cliente não deve ouvir nada antes de conectar
+
+  // Conecta o cliente à MESMA conferência
+  const dial = twiml.dial();
+  dial.conference(conferenceName);
+  // dial.conference({ startConferenceOnEnter: true }, conferenceName);
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// --- Endpoint Opcional para Status da Chamada ---
+// Descomente se precisar rastrear o status (precisa configurar statusCallback nas chamadas API)
+/*
+app.post('/call-status', (req, res) => {
+  const callSid = req.body.CallSid;
+  const callStatus = req.body.CallStatus; // completed, busy, failed, no-answer, canceled
+  const direction = req.body.Direction; // outbound-api (para este caso)
+  const to = req.body.To;
+  const duration = req.body.CallDuration; // Duração em segundos (se 'completed')
+
+  console.log(`Status da Chamada (SID: ${callSid}, Direção: ${direction}, Para: ${to}): ${callStatus}`);
+  if (callStatus === 'completed') {
+    console.log(`  Duração: ${duration} segundos`);
+  }
+
+  // Adicione lógica aqui se precisar (ex: registrar no banco de dados)
+
+  res.sendStatus(200); // Apenas confirma o recebimento para o Twilio
+});
+*/
 
 // --- Rota de Health Check (Opcional, mas útil) ---
 app.get('/health', (req, res) => {
@@ -184,12 +195,14 @@ app.get('/health', (req, res) => {
 });
 
 // --- Inicialização do Servidor ---
-const PORT = process.env.PORT || 3000; // Usa a porta definida pelo Easypanel ou 3000 como padrão
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor Twilio Call Masking iniciado na porta ${PORT}`);
-  console.log(`Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Servidor Twilio API Call Masking iniciado na porta ${PORT}`);
+  console.log(`URL Base para Webhooks: ${BASE_URL}`);
   console.log('Endpoints disponíveis:');
-  console.log(`  GET /generate-token?identity=<client_id>&platform=<platform>&production=<true|false>`);
-  console.log(`  POST /make-call (Webhook Twilio)`);
-  console.log(`  GET /health (Health Check)`);
+  console.log(`  POST ${BASE_URL}/iniciar-chamada-mascarada (Gatilho FlutterFlow)`);
+  console.log(`  POST ${BASE_URL}/handle-tecnico-answer (Webhook TwiML)`);
+  console.log(`  POST ${BASE_URL}/handle-cliente-answer (Webhook TwiML)`);
+  // console.log(`  POST ${BASE_URL}/call-status (Webhook Status Opcional)`);
+  console.log(`  GET ${BASE_URL}/health (Health Check)`);
 });
