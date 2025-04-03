@@ -1,39 +1,49 @@
 const { VoiceResponse } = require('twilio').twiml;
-const AccessToken = require('twilio').jwt.AccessToken;
-const VoiceGrant = AccessToken.VoiceGrant;
-
-const defaultIdentity = 'alice';
 
 function welcome() {
-  const voiceResponse = new VoiceResponse();
-  voiceResponse.say("Welcome to Twilio");
-  return voiceResponse.toString();
+  return '🎉 Twilio Voice Server está rodando!';
 }
 
 function incoming() {
-  const voiceResponse = new VoiceResponse();
-  voiceResponse.say("Congratulations! You have received your first inbound call!");
-  return voiceResponse.toString();
+  const twiml = new VoiceResponse();
+  twiml.say('Chamada recebida. Obrigado por ligar.');
+  return twiml.toString();
 }
 
-function tokenGenerator(request, response) {
-  const identity = request.body.identity || request.query.identity || defaultIdentity;
+function connectClient(req, res) {
+  const to = req.query.to;
+  const twiml = new VoiceResponse();
+  const dial = twiml.dial();
+  dial.number(to);
+  res.type('text/xml');
+  res.send(twiml.toString());
+}
 
-  const token = new AccessToken(
-    process.env.ACCOUNT_SID,
+async function placeCall(req, res) {
+  const to = req.body.to || req.query.to;
+  const fromNumber = process.env.CALLER_NUMBER;
+
+  const callbackUrl =
+    req.protocol + '://' + req.get('host') + '/connect-client?to=' + encodeURIComponent(to);
+
+  const client = require('twilio')(
     process.env.API_KEY,
-    process.env.API_KEY_SECRET
+    process.env.API_KEY_SECRET,
+    { accountSid: process.env.ACCOUNT_SID }
   );
 
-  token.identity = identity;
-
-  const voiceGrant = new VoiceGrant({
-    outgoingApplicationSid: process.env.APP_SID,
-    pushCredentialSid: process.env.PUSH_CREDENTIAL_SID,
-  });
-
-  token.addGrant(voiceGrant);
-  response.send(token.toJwt());
+  try {
+    const call = await client.calls.create({
+      url: callbackUrl,
+      to: fromNumber,
+      from: fromNumber,
+    });
+    console.log(`📞 Ligando para técnico: ${fromNumber} -> Cliente: ${to}`);
+    res.send(call.sid);
+  } catch (err) {
+    console.error('Erro ao ligar:', err);
+    res.status(500).send('Erro ao fazer chamada.');
+  }
 }
 
-module.exports = { tokenGenerator, welcome, incoming };
+module.exports = { welcome, incoming, connectClient, placeCall };
