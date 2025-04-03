@@ -1,8 +1,8 @@
-version: '3.8'
-
+version: '3'
 services:
-  twilio-voice-app:
+  voice-server:
     build: .
+    container_name: voice-server
     ports:
       - "3000:3000"
     env_file:
