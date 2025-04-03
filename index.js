@@ -30,4 +30,25 @@ app.post('/place-call', async (req, res) => {
     const call = await client.calls.create({
       url: twimlUrl,
       to: technicianNumber,  // Liga para o técnico primeiro
-      from:
+      from: process.env.CALLER_NUMBER
+    });
+
+    console.log("Ligação iniciada:", call.sid);
+    res.send({ callSid: call.sid });
+  } catch (error) {
+    console.error("Erro ao iniciar chamada:", error);
+    res.status(500).send("Erro ao fazer chamada.");
+  }
+});
+
+app.post('/connect-call', (req, res) => {
+  const customerNumber = req.query.customerNumber;
+  const twiml = new VoiceResponse();
+  twiml.dial(customerNumber); // Conecta com o cliente após técnico atender
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+app.listen(port, () => {
+  console.log(`Servidor rodando na porta ${port}`);
+});
