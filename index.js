@@ -1,8 +1,11 @@
-require('dotenv').config(); // use .config() em vez de .load()
+// Carrega variáveis de ambiente
+require('dotenv').config();
 
 const http = require('http');
+const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 const methods = require('./src/server.js');
 
 const {
@@ -10,38 +13,38 @@ const {
   makeCall,
   placeCall,
   incoming,
-  welcome,
+  welcome
 } = methods;
 
-// Inicia a aplicação
+// Criação do app Express
 const app = express();
-const port = process.env.PORT || 3000;
 
-// Middleware
+// Ativa CORS para evitar erros no Flutter Web
+app.use(cors());
+
+// Parser para formulário
 app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json()); // aceita JSON também
+app.use(bodyParser.json()); // Adicionado para aceitar JSON
 
-// Raiz (opcional)
+// Rotas
 app.get('/', (req, res) => res.send(welcome()));
 app.post('/', (req, res) => res.send(welcome()));
 
-// Token de acesso
-app.get('/access-token', tokenGenerator);
-app.post('/access-token', tokenGenerator);
+app.get('/accessToken', tokenGenerator);
+app.post('/accessToken', tokenGenerator);
 
-// Faz a chamada (Twilio envia para isso)
-app.get('/make-call', makeCall);
-app.post('/make-call', makeCall);
+app.get('/makeCall', makeCall);
+app.post('/makeCall', makeCall);
 
-// Cliente inicia chamada
-app.get('/place-call', placeCall);
-app.post('/place-call', placeCall);
+app.get('/placeCall', placeCall);
+app.post('/placeCall', placeCall);
 
-// Recebe chamada
 app.get('/incoming', (req, res) => res.send(incoming()));
 app.post('/incoming', (req, res) => res.send(incoming()));
 
-// Start servidor
-http.createServer(app).listen(port, () => {
-  console.log(`✅ Servidor rodando na porta ${port}`);
+// Inicia o servidor
+const port = process.env.PORT || 3000;
+const server = http.createServer(app);
+server.listen(port, () => {
+  console.log(`🚀 Servidor rodando em http://localhost:${port}`);
 });
