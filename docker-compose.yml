@@ -1,10 +1,9 @@
-version: '3'
+version: '3.8'
 services:
-  voice-server:
+  app:
     build: .
-    container_name: voice-server
     ports:
       - "3000:3000"
     env_file:
       - .env
-    restart: always
+    restart: unless-stopped
