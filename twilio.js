@@ -1,42 +1,39 @@
+const express = require('express');
+const router = express.Router();
 const { VoiceResponse } = require('twilio').twiml;
-const client = require('twilio')(
-  process.env.API_KEY,
-  process.env.API_KEY_SECRET,
-  { accountSid: process.env.ACCOUNT_SID }
-);
 
-exports.placeCall = async (req, res) => {
-  const fromNumber = req.body.from;
-  const toNumber = req.body.to;
+router.get('/connect-client', (req, res) => {
+  const to = req.query.to;
+  const twiml = new VoiceResponse();
+  const dial = twiml.dial();
+  dial.number(to);
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
 
-  if (!fromNumber || !toNumber) {
-    console.error('Parâmetros "from" ou "to" estão faltando.');
-    return res.status(400).send('Parâmetros "from" e "to" são obrigatórios.');
-  }
+router.post('/place-call', async (req, res) => {
+  const to = req.body.to || req.query.to;
+  const technicianNumber = req.body.from || process.env.CALLER_NUMBER;
 
-  const callbackUrl = `${req.protocol}://${req.get('host')}/connect-client?to=${encodeURIComponent(toNumber)}`;
+  const callbackUrl = `${req.protocol}://${req.get('host')}/connect-client?to=${encodeURIComponent(to)}`;
+
+  const client = require('twilio')(
+    process.env.API_KEY,
+    process.env.API_KEY_SECRET,
+    { accountSid: process.env.ACCOUNT_SID }
+  );
 
   try {
     const call = await client.calls.create({
       url: callbackUrl,
-      to: fromNumber,
-      from: fromNumber,
+      to: technicianNumber,
+      from: process.env.CALLER_NUMBER,
     });
-    res.status(200).send({ sid: call.sid });
-    console.log(`Chamada iniciada com sucesso: ${call.sid}`);
+    res.send(call.sid);
   } catch (error) {
-    console.error('Erro ao fazer a chamada:', error.message);
-    res.status(500).send(`Erro: ${error.message}`);
+    console.error('Erro ao ligar:', error);
+    res.status(500).send('Erro ao fazer chamada.');
   }
-};
+});
 
-exports.connectClient = (req, res) => {
-  const toNumber = req.query.to;
-  const twiml = new VoiceResponse();
-  const dial = twiml.dial();
-  dial.number(toNumber);
-
-  res.type('text/xml');
-  res.send(twiml.toString());
-  console.log(`Conectando cliente: ${toNumber}`);
-};
+module.exports = router;
