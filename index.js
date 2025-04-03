@@ -1,62 +1,47 @@
-require('dotenv').load();
+require('dotenv').config(); // use .config() em vez de .load()
 
 const http = require('http');
-const path = require('path');
 const express = require('express');
-const bodyParser = require('body-parser')
+const bodyParser = require('body-parser');
 const methods = require('./src/server.js');
-const tokenGenerator = methods.tokenGenerator;
-const makeCall = methods.makeCall;
-const placeCall = methods.placeCall;
-const incoming = methods.incoming;
-const welcome = methods.welcome;
-var twilio = require('twilio');
 
-// Create Express webapp
+const {
+  tokenGenerator,
+  makeCall,
+  placeCall,
+  incoming,
+  welcome,
+} = methods;
+
+// Inicia a aplicação
 const app = express();
-
-// parse application/x-www-form-urlencoded
-app.use(bodyParser.urlencoded({ extended: false }))
-
-app.get('/', function(request, response) {
-  response.send(welcome());
-});
-
-app.post('/', function(request, response) {
-  response.send(welcome());
-});
-
-app.get('/accessToken', function(request, response) {
-  tokenGenerator(request, response);
-});
-
-app.post('/accessToken', function(request, response) {
-  tokenGenerator(request, response);
-});
-
-app.get('/makeCall', function(request, response) {
-  makeCall(request, response);
-});
-
-app.post('/makeCall', function(request, response) {
-  makeCall(request, response);
-});
-
-app.get('/placeCall', placeCall);
-
-app.post('/placeCall', placeCall);
-
-app.get('/incoming', function(request, response) {
-  response.send(incoming());
-});
-
-app.post('/incoming', function(request, response) {
-  response.send(incoming());
-});
-
-// Create an http server and run it
-const server = http.createServer(app);
 const port = process.env.PORT || 3000;
-server.listen(port, function() {
-  console.log('Express server running on *:' + port);
+
+// Middleware
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json()); // aceita JSON também
+
+// Raiz (opcional)
+app.get('/', (req, res) => res.send(welcome()));
+app.post('/', (req, res) => res.send(welcome()));
+
+// Token de acesso
+app.get('/access-token', tokenGenerator);
+app.post('/access-token', tokenGenerator);
+
+// Faz a chamada (Twilio envia para isso)
+app.get('/make-call', makeCall);
+app.post('/make-call', makeCall);
+
+// Cliente inicia chamada
+app.get('/place-call', placeCall);
+app.post('/place-call', placeCall);
+
+// Recebe chamada
+app.get('/incoming', (req, res) => res.send(incoming()));
+app.post('/incoming', (req, res) => res.send(incoming()));
+
+// Start servidor
+http.createServer(app).listen(port, () => {
+  console.log(`✅ Servidor rodando na porta ${port}`);
 });
