@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js" // Opcional: para desenvolvimento local com reinício automático
+    "dev": "node --watch server.js"
   },
   "keywords": [
     "twilio",
@@ -17,8 +17,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "dotenv": "^16.4.5", // Necessário para carregar .env em desenvolvimento local
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "twilio": "^5.0.4" // Verifique a versão mais recente se desejar
+    "twilio": "^5.0.4"
   }
 }
