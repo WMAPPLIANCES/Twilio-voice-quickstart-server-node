@@ -1,130 +1,65 @@
-require('dotenv').config(); // CORRIGIDO: ".load()" era inválido para dotenv
+// server.js
+require('dotenv').config();
 
-const { jwt: { AccessToken }, twiml: { VoiceResponse } } = require('twilio');
-const VoiceGrant = AccessToken.VoiceGrant;
+const express = require('express');
+const bodyParser = require('body-parser');
+const { VoiceResponse } = require('twilio').twiml;
+const { tokenGenerator, welcome, incoming } = require('./src/server');
+const app = express();
+const http = require('http');
 
-const defaultIdentity = 'alice';
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
-// Use um número de telefone verificado na sua conta Twilio
-const callerId = 'client:quick_start';
-const callerNumber = process.env.CALLER_NUMBER || '+15109004696'; // Twilio test number ou seu número verificado
+app.get('/', (req, res) => res.send(welcome()));
+app.post('/', (req, res) => res.send(welcome()));
 
-function tokenGenerator(request, response) {
-  const identity = request.method === 'POST'
-    ? request.body.identity || defaultIdentity
-    : request.query.identity || defaultIdentity;
+app.get('/accessToken', tokenGenerator);
+app.post('/accessToken', tokenGenerator);
 
-  const accountSid = process.env.ACCOUNT_SID;
-  const apiKey = process.env.API_KEY;
-  const apiSecret = process.env.API_KEY_SECRET;
-  const outgoingApplicationSid = process.env.APP_SID;
-  const pushCredSid = process.env.PUSH_CREDENTIAL_SID; // Pode estar vazio, se não usar Push
+app.get('/incoming', (req, res) => res.send(incoming()));
+app.post('/incoming', (req, res) => res.send(incoming()));
 
-  const voiceGrant = new VoiceGrant({
-    outgoingApplicationSid,
-    pushCredentialSid: pushCredSid
-  });
+// Nova rota: conecta com cliente ao atender
+app.get('/connect-client', (req, res) => {
+  const to = req.query.to;
+  const twiml = new VoiceResponse();
+  const dial = twiml.dial();
+  dial.number(to);
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
 
-  const token = new AccessToken(accountSid, apiKey, apiSecret);
-  token.addGrant(voiceGrant);
-  token.identity = identity;
+// Nova rota: inicia chamada ligando para empresa
+app.post('/place-call', async (req, res) => {
+  const to = req.body.to || req.query.to;
+  const fromNumber = process.env.CALLER_NUMBER;
+  const callbackUrl = req.protocol + '://' + req.get('host') + '/connect-client?to=' + encodeURIComponent(to);
 
-  console.log('Token:', token.toJwt());
-  return response.send(token.toJwt());
-}
-
-function makeCall(request, response) {
-  const to = request.method === 'POST' ? request.body.to : request.query.to;
-  const voiceResponse = new VoiceResponse();
-
-  if (!to) {
-    voiceResponse.say("Congratulations! You have made your first call! Good bye.");
-  } else if (isNumber(to)) {
-    const dial = voiceResponse.dial({ callerId: callerNumber });
-    dial.number(to);
-  } else {
-    const dial = voiceResponse.dial({ callerId });
-    dial.client(to);
-  }
-
-  console.log('Response:', voiceResponse.toString());
-  return response.send(voiceResponse.toString());
-}
-
-async function placeCall(request, response) {
-  const to = request.method === 'POST' ? request.body.to : request.query.to;
-
-  const url = `${request.protocol}://${request.get('host')}/incoming`;
-
-  const accountSid = process.env.ACCOUNT_SID;
-  const apiKey = process.env.API_KEY;
-  const apiSecret = process.env.API_KEY_SECRET;
-  const client = require('twilio')(apiKey, apiSecret, { accountSid });
-
-  let call;
+  const client = require('twilio')(
+    process.env.API_KEY,
+    process.env.API_KEY_SECRET,
+    { accountSid: process.env.ACCOUNT_SID }
+  );
 
   try {
-    if (!to) {
-      call = await client.calls.create({
-        url,
-        to: `client:${defaultIdentity}`,
-        from: callerId,
-      });
-    } else if (isNumber(to)) {
-      call = await client.calls.create({
-        url,
-        to,
-        from: callerNumber,
-      });
-    } else {
-      call = await client.calls.create({
-        url,
-        to: `client:${to}`,
-        from: callerId,
-      });
-    }
-
-    console.log("Call SID:", call.sid);
-    return response.send(call.sid);
+    const call = await client.calls.create({
+      url: callbackUrl,
+      to: fromNumber,
+      from: fromNumber
+    });
+    res.send(call.sid);
   } catch (error) {
-    console.error("Call Error:", error);
-    return response.status(500).send(error.message);
+    console.error('Erro ao fazer a chamada:', error);
+    res.status(500).send('Erro ao iniciar a chamada');
   }
-}
+});
 
-function incoming() {
-  const voiceResponse = new VoiceResponse();
-  voiceResponse.say("Congratulations! You have received your first inbound call! Goodbye.");
-  console.log('Incoming Response:', voiceResponse.toString());
-  return voiceResponse.toString();
-}
+const port = process.env.PORT || 3000;
+http.createServer(app).listen(port, () => {
+  console.log('Servidor rodando na porta *:' + port);
+});
 
-function welcome() {
-  const voiceResponse = new VoiceResponse();
-  voiceResponse.say("Welcome to Twilio Voice App");
-  console.log('Welcome Response:', voiceResponse.toString());
-  return voiceResponse.toString();
-}
-
-function isNumber(to) {
-  if (!to) return false;
-
-  if (to.length === 1 && !isNaN(to)) return true;
-
-  if (String(to).charAt(0) === '+') {
-    return !isNaN(to.substring(1));
-  }
-
-  return !isNaN(to);
-}
-
-module.exports = {
-  tokenGenerator,
-  makeCall,
-  placeCall,
-  incoming,
-  welcome
-};
 
 exports.placeCall = placeCall;
 exports.incoming = incoming;
