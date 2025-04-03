@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/seu-usuario/seu-repositorio"
+    "url": "https://github.com/WMAPPLIANCES/Twilio-voice-quickstart-server-node/tree/master"
   },
   "keywords": [
     "twilio",
@@ -17,7 +17,7 @@
     "nodejs",
     "express"
   ],
-  "author": "Seu Nome",
+  "author": "Willian Marciano",
   "license": "MIT",
   "engines": {
     "node": ">=14"
