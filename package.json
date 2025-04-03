@@ -1,37 +1,20 @@
 {
   "name": "twilio-voice-app",
   "version": "1.0.0",
-  "description": "Aplicação para integração com Twilio Voice",
+  "description": "Servidor Node para chamadas com Twilio Voice",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "NODE_ENV=test jest"
+    "start": "node index.js"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/WMAPPLIANCES/Twilio-voice-quickstart-server-node/tree/master"
-  },
-  "keywords": [
-    "twilio",
-    "voice",
-    "nodejs",
-    "express"
-  ],
-  "author": "Willian Marciano",
+  "author": "WM Appliances",
   "license": "MIT",
   "engines": {
-    "node": ">=14"
+    "node": ">=16"
   },
   "dependencies": {
     "body-parser": "^1.20.2",
-    "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^4.18.2",
     "twilio": "^4.13.0"
-  },
-  "devDependencies": {
-    "jest": "^29.0.0"
   }
 }
-
-
