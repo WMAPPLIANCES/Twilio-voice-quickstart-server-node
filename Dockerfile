@@ -1,13 +1,17 @@
-FROM node:18-alpine
+# Usa imagem oficial do Node.js
+FROM node:18
 
-WORKDIR /usr/src/app
+# Define diretório de trabalho
+WORKDIR /app
 
-COPY package*.json ./
-
-RUN npm install
-
+# Copia os arquivos
 COPY . .
 
+# Instala dependências
+RUN npm install
+
+# Expõe a porta do app (altere se necessário)
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Comando para rodar o servidor
+CMD ["node", "src/server.js"]
