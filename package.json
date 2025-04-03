@@ -4,8 +4,8 @@
   "description": "Backend server for Twilio call masking using twilio_voice",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node scr/server.js",
+    "dev": "node --watch /scrserver.js"
   },
   "keywords": [
     "twilio",
