@@ -1,49 +1,85 @@
-const { VoiceResponse } = require('twilio').twiml;
+const twilio = require('twilio');
+const { VoiceResponse } = twilio.twiml;
 
-function welcome() {
-  return '🎉 Twilio Voice Server está rodando!';
+const accountSid = process.env.ACCOUNT_SID;
+const apiKey = process.env.API_KEY;
+const apiSecret = process.env.API_KEY_SECRET;
+
+const client = twilio(apiKey, apiSecret, { accountSid });
+
+/**
+ * Gera um token de acesso para uso com Twilio Client (não obrigatório para chamadas normais).
+ */
+function tokenGenerator(request, response) {
+  response.send({ token: 'Token generation not implemented here.' });
 }
 
+/**
+ * Mensagem de boas-vindas simples.
+ */
+function welcome() {
+  return '🟢 Servidor Twilio ativo.';
+}
+
+/**
+ * Resposta de voz de teste para chamadas recebidas.
+ */
 function incoming() {
   const twiml = new VoiceResponse();
-  twiml.say('Chamada recebida. Obrigado por ligar.');
+  twiml.say('Você está conectado à WM Appliances. Obrigado pela sua ligação.');
   return twiml.toString();
 }
 
-function connectClient(req, res) {
-  const to = req.query.to;
-  const twiml = new VoiceResponse();
-  const dial = twiml.dial();
-  dial.number(to);
-  res.type('text/xml');
-  res.send(twiml.toString());
-}
+/**
+ * Inicia a ligação: primeiro para o técnico/empresa (campo `from`), depois conecta ao cliente (`to`).
+ */
+async function placeCall(request, response) {
+  const from = request.body.from;
+  const to = request.body.to;
 
-async function placeCall(req, res) {
-  const to = req.body.to || req.query.to;
-  const fromNumber = process.env.CALLER_NUMBER;
+  if (!from || !to) {
+    return response.status(400).send('Parâmetros "from" e "to" são obrigatórios.');
+  }
 
-  const callbackUrl =
-    req.protocol + '://' + req.get('host') + '/connect-client?to=' + encodeURIComponent(to);
-
-  const client = require('twilio')(
-    process.env.API_KEY,
-    process.env.API_KEY_SECRET,
-    { accountSid: process.env.ACCOUNT_SID }
-  );
+  const callbackUrl = `${request.protocol}://${request.get('host')}/connect-client?to=${encodeURIComponent(to)}`;
 
   try {
     const call = await client.calls.create({
       url: callbackUrl,
-      to: fromNumber,
-      from: fromNumber,
+      to: from,         // primeiro liga para a empresa/técnico
+      from: from        // caller ID verificado (igual ao "to")
     });
-    console.log(`📞 Ligando para técnico: ${fromNumber} -> Cliente: ${to}`);
-    res.send(call.sid);
+
+    console.log(`🔁 Ligando para ${from}, depois conectando com ${to}`);
+    response.send({ data: call.sid });
   } catch (err) {
-    console.error('Erro ao ligar:', err);
-    res.status(500).send('Erro ao fazer chamada.');
+    console.error('❌ Erro ao ligar:', err.message);
+    response.status(500).send('Erro ao fazer chamada.');
   }
 }
 
-module.exports = { welcome, incoming, connectClient, placeCall };
+/**
+ * Quando a empresa/técnico atende, conecta com o cliente.
+ */
+function connectClient(request, response) {
+  const to = request.query.to;
+
+  if (!to) {
+    return response.status(400).send('Parâmetro "to" é obrigatório.');
+  }
+
+  const twiml = new VoiceResponse();
+  const dial = twiml.dial();
+  dial.number(to);
+
+  response.type('text/xml');
+  response.send(twiml.toString());
+}
+
+module.exports = {
+  tokenGenerator,
+  welcome,
+  incoming,
+  placeCall,
+  connectClient,
+};
