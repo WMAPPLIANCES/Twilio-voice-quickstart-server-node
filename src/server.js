@@ -7,7 +7,7 @@ const defaultIdentity = 'alice';
 
 // Use um número de telefone verificado na sua conta Twilio
 const callerId = 'client:quick_start';
-const callerNumber = process.env.CALLER_NUMBER || '+15103933334'; // Twilio test number ou seu número verificado
+const callerNumber = process.env.CALLER_NUMBER || '+15109004696'; // Twilio test number ou seu número verificado
 
 function tokenGenerator(request, response) {
   const identity = request.method === 'POST'
