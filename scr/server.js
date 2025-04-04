@@ -1,14 +1,14 @@
-// Carrega variáveis de ambiente do arquivo .env APENAS em ambiente de desenvolvimento local
+// Load environment variables from .env file ONLY in local development environment
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
 }
 
 const express = require('express');
 const twilio = require('twilio');
-const crypto = require('crypto'); // Para gerar IDs únicos para a conferência
+const crypto = require('crypto'); // To generate unique IDs for the conference
 
-// --- Validação Inicial das Variáveis de Ambiente Essenciais ---
-// Para este fluxo, precisamos apenas do Account SID, Auth Token e o Número de Máscara
+// --- Initial Validation of Essential Environment Variables ---
+// For this flow, we only need Account SID, Auth Token, and the Masking Number
 const requiredEnvVars = [
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
@@ -18,148 +18,154 @@ const requiredEnvVars = [
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
 if (missingEnvVars.length > 0) {
-  console.error('ERRO FATAL: Variáveis de ambiente ausentes:', missingEnvVars.join(', '));
-  console.error('Por favor, configure essas variáveis no seu ambiente (Easypanel ou .env local).');
-  process.exit(1);
+  console.error('FATAL ERROR: Missing environment variables:', missingEnvVars.join(', '));
+  console.error('Please configure these variables in your environment (Easypanel or local .env).');
+  process.exit(1); // Stop the server if essential config is missing
 }
 
-// --- Configuração das Credenciais (lidas do ambiente) ---
+// --- Credential Configuration (read from environment) ---
 const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
-const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN; // ESSENCIAL para a API REST
-const twilioMaskingNumber = process.env.TWILIO_NUMBER_MASK; // Seu número Twilio comprado
+const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN; // ESSENTIAL for REST API
+const twilioMaskingNumber = process.env.TWILIO_NUMBER_MASK; // Your purchased Twilio number
 
-// --- Inicialização do Cliente Twilio (para API REST) ---
+// --- Initialize Twilio Client (for REST API) ---
 const twilioClient = twilio(twilioAccountSid, twilioAuthToken);
 
-// --- Inicialização do Express ---
+// --- Initialize Express ---
 const app = express();
-// Middleware para parsear JSON (para o endpoint de gatilho /iniciar-chamada-mascarada)
+// Middleware to parse JSON (for the trigger endpoint /start-masked-call)
 app.use(express.json());
-// Middleware para parsear dados de formulário URL-encoded (usado pelos webhooks TwiML do Twilio)
+// Middleware to parse URL-encoded form data (used by Twilio TwiML webhooks)
 app.use(express.urlencoded({ extended: false }));
 
-// --- Constante com a URL Base do seu serviço ---
-// Certifique-se que esta é a URL pública correta do seu serviço no Easypanel
+// --- Constant with the Base URL of your service ---
+// Make sure this is the correct public URL of your service on Easypanel
 const BASE_URL = 'https://phone.wmappliances.cloud';
 
-// --- Endpoint de Gatilho (Chamado pelo FlutterFlow) ---
-app.post('/iniciar-chamada-mascarada', async (req, res) => {
-  const { tecnicoNumero, clienteNumero } = req.body;
+// --- Trigger Endpoint (Called by FlutterFlow) ---
+app.post('/start-masked-call', async (req, res) => {
+  // Use English variable names from request body
+  const { technicianNumber, customerNumber } = req.body;
 
-  console.log(`Recebida solicitação para conectar Técnico (${tecnicoNumero}) e Cliente (${clienteNumero})`);
+  console.log(`Received request to connect Technician (${technicianNumber}) and Customer (${customerNumber})`);
 
-  // Validação básica dos números (adicione validações mais robustas se necessário)
-  if (!tecnicoNumero || !clienteNumero) {
-    console.error('Erro: Números do técnico ou cliente não fornecidos.');
-    return res.status(400).json({ success: false, message: 'Números do técnico e cliente são obrigatórios.' });
+  // Basic number validation (add more robust validation if needed)
+  if (!technicianNumber || !customerNumber) {
+    console.error('Error: Technician or customer number not provided.');
+    return res.status(400).json({ success: false, message: 'Technician and customer numbers are required.' });
   }
-  // Adicione aqui validação de formato E.164 se desejar (ex: /^\+[1-9]\d{1,14}$/)
+  // Add E.164 format validation here if desired (e.g., /^\+[1-9]\d{1,14}$/)
 
-  // Gera um nome único para a sala de conferência desta sessão
+  // Generate a unique name for the conference room for this session
   const conferenceName = `conf_${crypto.randomUUID()}`;
-  console.log(`Usando sala de conferência: ${conferenceName}`);
+  console.log(`Using conference room: ${conferenceName}`);
 
   try {
-    // 1. Iniciar chamada para o TÉCNICO
-    console.log(`Iniciando chamada para o Técnico: ${tecnicoNumero}`);
-    const callToTecnico = await twilioClient.calls.create({
-      to: tecnicoNumero,
+    // 1. Initiate call to the TECHNICIAN
+    console.log(`Initiating call to Technician: ${technicianNumber}`);
+    const callToTechnician = await twilioClient.calls.create({
+      to: technicianNumber,
       from: twilioMaskingNumber,
-      // URL que o Twilio chamará QUANDO o técnico atender
-      // Passamos o nome da conferência como query parameter
-      url: `${BASE_URL}/handle-tecnico-answer?confName=${encodeURIComponent(conferenceName)}`,
-      method: 'POST', // Método que o Twilio usará para chamar a URL acima
-      // Você pode adicionar um statusCallback para saber o status da chamada (ringing, answered, completed, etc.)
+      // URL Twilio will call WHEN the technician answers
+      // Pass the conference name as a query parameter
+      // Use the English endpoint name here
+      url: `${BASE_URL}/handle-technician-answer?confName=${encodeURIComponent(conferenceName)}`,
+      method: 'POST', // Method Twilio will use to call the URL above
+      // You can add a statusCallback to know the call status (ringing, answered, completed, etc.)
       // statusCallback: `${BASE_URL}/call-status`,
       // statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       // statusCallbackMethod: 'POST',
     });
-    console.log(`Chamada para Técnico iniciada, SID: ${callToTecnico.sid}`);
+    console.log(`Call to Technician initiated, SID: ${callToTechnician.sid}`);
 
-    // 2. Iniciar chamada para o CLIENTE
-    console.log(`Iniciando chamada para o Cliente: ${clienteNumero}`);
-    const callToCliente = await twilioClient.calls.create({
-      to: clienteNumero,
-      from: twilioMaskingNumber, // IMPORTANTE: Usar o mesmo número de máscara
-      // URL que o Twilio chamará QUANDO o cliente atender
-      url: `${BASE_URL}/handle-cliente-answer?confName=${encodeURIComponent(conferenceName)}`,
+    // 2. Initiate call to the CUSTOMER
+    console.log(`Initiating call to Customer: ${customerNumber}`);
+    const callToCustomer = await twilioClient.calls.create({
+      to: customerNumber,
+      from: twilioMaskingNumber, // IMPORTANT: Use the same masking number
+      // URL Twilio will call WHEN the customer answers
+      // Use the English endpoint name here
+      url: `${BASE_URL}/handle-customer-answer?confName=${encodeURIComponent(conferenceName)}`,
       method: 'POST',
       // statusCallback: `${BASE_URL}/call-status`,
       // statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       // statusCallbackMethod: 'POST',
     });
-    console.log(`Chamada para Cliente iniciada, SID: ${callToCliente.sid}`);
+    console.log(`Call to Customer initiated, SID: ${callToCustomer.sid}`);
 
-    // Responde ao FlutterFlow que as chamadas foram iniciadas
+    // Respond to FlutterFlow that calls have been initiated
     res.status(200).json({
       success: true,
-      message: 'Chamadas para técnico e cliente iniciadas.',
-      conferenceName: conferenceName, // Opcional: retornar o nome da conferência
-      tecnicoCallSid: callToTecnico.sid, // Opcional: retornar SIDs
-      clienteCallSid: callToCliente.sid,
+      message: 'Calls to technician and customer initiated.',
+      conferenceName: conferenceName, // Optional: return conference name
+      technicianCallSid: callToTechnician.sid, // Optional: return SIDs
+      customerCallSid: callToCustomer.sid,
     });
 
   } catch (error) {
-    console.error('Erro ao iniciar chamadas via API Twilio:', error);
-    // Tenta pegar a mensagem de erro específica do Twilio, se disponível
-    const errorMessage = error.message || 'Erro interno do servidor ao iniciar chamadas.';
+    console.error('Error initiating calls via Twilio API:', error);
+    // Try to get the specific Twilio error message, if available
+    const errorMessage = error.message || 'Internal server error initiating calls.';
     const errorStatus = error.status || 500;
     res.status(errorStatus).json({ success: false, message: errorMessage });
   }
 });
 
-// --- Endpoint TwiML chamado quando o TÉCNICO atende ---
-app.post('/handle-tecnico-answer', (req, res) => {
-  const conferenceName = req.query.confName; // Pega o nome da conferência do query param
-  const callSid = req.body.CallSid; // SID da chamada do técnico
+// --- TwiML Endpoint called when the TECHNICIAN answers ---
+app.post('/handle-technician-answer', (req, res) => {
+  const conferenceName = req.query.confName; // Get conference name from query param
+  const callSid = req.body.CallSid; // SID of the technician's call leg
 
-  console.log(`Técnico atendeu (CallSid: ${callSid}). Conectando à conferência: ${conferenceName}`);
+  console.log(`Technician answered (CallSid: ${callSid}). Connecting to conference: ${conferenceName}`);
 
   if (!conferenceName) {
-      console.error("Erro: Nome da conferência não recebido no TwiML do técnico.");
-      // Responde com erro, mas evita que a chamada caia imediatamente
+      console.error("Error: Conference name not received in technician's TwiML.");
+      // Respond with error, but prevent the call from dropping immediately
       const twimlError = new twilio.twiml.VoiceResponse();
-      twimlError.say({ language: 'pt-BR' }, 'Ocorreu um erro ao conectar. Por favor, tente novamente.');
+      // Use English for the voice message
+      twimlError.say({ language: 'en-US' }, 'An error occurred while connecting. Please try again.');
       twimlError.hangup();
       res.type('text/xml');
       return res.send(twimlError.toString());
   }
 
   const twiml = new twilio.twiml.VoiceResponse();
-  // Mensagem opcional para o técnico
-  twiml.say({ language: 'pt-BR' }, 'Conectando você ao cliente. Por favor, aguarde.');
+  // Optional message for the technician
+  // Use English for the voice message
+  twiml.say({ language: 'en-US' }, 'Connecting you to the customer. Please wait.');
 
-  // Conecta o técnico à conferência especificada
+  // Connect the technician to the specified conference
   const dial = twiml.dial();
   dial.conference(conferenceName);
-  // Você pode adicionar atributos à conferência aqui, se necessário
-  // Ex: startConferenceOnEnter=true, endConferenceOnExit=true (cuidado com este último)
+  // You can add attributes to the conference here if needed
+  // Ex: startConferenceOnEnter=true, endConferenceOnExit=true (be careful with the latter)
   // dial.conference({ startConferenceOnEnter: true }, conferenceName);
 
   res.type('text/xml');
   res.send(twiml.toString());
 });
 
-// --- Endpoint TwiML chamado quando o CLIENTE atende ---
-app.post('/handle-cliente-answer', (req, res) => {
-  const conferenceName = req.query.confName; // Pega o nome da conferência do query param
-  const callSid = req.body.CallSid; // SID da chamada do cliente
+// --- TwiML Endpoint called when the CUSTOMER answers ---
+app.post('/handle-customer-answer', (req, res) => {
+  const conferenceName = req.query.confName; // Get conference name from query param
+  const callSid = req.body.CallSid; // SID of the customer's call leg
 
-  console.log(`Cliente atendeu (CallSid: ${callSid}). Conectando à conferência: ${conferenceName}`);
+  console.log(`Customer answered (CallSid: ${callSid}). Connecting to conference: ${conferenceName}`);
 
    if (!conferenceName) {
-      console.error("Erro: Nome da conferência não recebido no TwiML do cliente.");
+      console.error("Error: Conference name not received in customer's TwiML.");
       const twimlError = new twilio.twiml.VoiceResponse();
-      twimlError.say({ language: 'pt-BR' }, 'Ocorreu um erro ao conectar. Por favor, tente novamente.');
+      // Use English for the voice message
+      twimlError.say({ language: 'en-US' }, 'An error occurred while connecting. Please try again.');
       twimlError.hangup();
       res.type('text/xml');
       return res.send(twimlError.toString());
   }
 
   const twiml = new twilio.twiml.VoiceResponse();
-  // NÃO coloque 'say' aqui, pois o cliente não deve ouvir nada antes de conectar
+  // DO NOT put 'say' here, as the customer shouldn't hear anything before connecting
 
-  // Conecta o cliente à MESMA conferência
+  // Connect the customer to the SAME conference
   const dial = twiml.dial();
   dial.conference(conferenceName);
   // dial.conference({ startConferenceOnEnter: true }, conferenceName);
@@ -168,41 +174,42 @@ app.post('/handle-cliente-answer', (req, res) => {
   res.send(twiml.toString());
 });
 
-// --- Endpoint Opcional para Status da Chamada ---
-// Descomente se precisar rastrear o status (precisa configurar statusCallback nas chamadas API)
+// --- Optional Endpoint for Call Status ---
+// Uncomment if you need to track status (requires configuring statusCallback in API calls)
 /*
 app.post('/call-status', (req, res) => {
   const callSid = req.body.CallSid;
   const callStatus = req.body.CallStatus; // completed, busy, failed, no-answer, canceled
-  const direction = req.body.Direction; // outbound-api (para este caso)
+  const direction = req.body.Direction; // outbound-api (for this case)
   const to = req.body.To;
-  const duration = req.body.CallDuration; // Duração em segundos (se 'completed')
+  const duration = req.body.CallDuration; // Duration in seconds (if 'completed')
 
-  console.log(`Status da Chamada (SID: ${callSid}, Direção: ${direction}, Para: ${to}): ${callStatus}`);
+  console.log(`Call Status (SID: ${callSid}, Direction: ${direction}, To: ${to}): ${callStatus}`);
   if (callStatus === 'completed') {
-    console.log(`  Duração: ${duration} segundos`);
+    console.log(`  Duration: ${duration} seconds`);
   }
 
-  // Adicione lógica aqui se precisar (ex: registrar no banco de dados)
+  // Add logic here if needed (e.g., log to database)
 
-  res.sendStatus(200); // Apenas confirma o recebimento para o Twilio
+  res.sendStatus(200); // Just acknowledge receipt to Twilio
 });
 */
 
-// --- Rota de Health Check (Opcional, mas útil) ---
+// --- Health Check Route (Optional, but useful) ---
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
-// --- Inicialização do Servidor ---
+// --- Server Initialization ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor Twilio API Call Masking iniciado na porta ${PORT}`);
-  console.log(`URL Base para Webhooks: ${BASE_URL}`);
-  console.log('Endpoints disponíveis:');
-  console.log(`  POST ${BASE_URL}/iniciar-chamada-mascarada (Gatilho FlutterFlow)`);
-  console.log(`  POST ${BASE_URL}/handle-tecnico-answer (Webhook TwiML)`);
-  console.log(`  POST ${BASE_URL}/handle-cliente-answer (Webhook TwiML)`);
-  // console.log(`  POST ${BASE_URL}/call-status (Webhook Status Opcional)`);
+  console.log(`Twilio API Call Masking server started on port ${PORT}`);
+  console.log(`Base URL for Webhooks: ${BASE_URL}`);
+  console.log('Available Endpoints:');
+  // Use English endpoint names here
+  console.log(`  POST ${BASE_URL}/start-masked-call (FlutterFlow Trigger)`);
+  console.log(`  POST ${BASE_URL}/handle-technician-answer (TwiML Webhook)`);
+  console.log(`  POST ${BASE_URL}/handle-customer-answer (TwiML Webhook)`);
+  // console.log(`  POST ${BASE_URL}/call-status (Optional Status Webhook)`);
   console.log(`  GET ${BASE_URL}/health (Health Check)`);
 });
